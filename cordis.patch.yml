@@ -1,0 +1,6 @@
+# dsh-starfleet bundle patch: inserts the space fleet tactics game panel
+# into the web profile roster. Host half manages game state and AI decisions.
+# Client half renders the 3D starfield with Three.js.
+- insert:
+    - id: starfleet
+      name: 'dsh-starfleet'

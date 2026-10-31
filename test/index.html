@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dsh-starfleet - Space Fleet Tactics</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #020208; overflow: hidden; font-family: Consolas, monospace; color: #0f8; }
+    #game-canvas { display: block; width: 100vw; height: 100vh; }
+    #ui-overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 10;
+    }
+    #ui-overlay > * { pointer-events: auto; }
+    
+    #top-bar {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 8px;
+      text-align: center; min-width: 300px;
+    }
+    #top-bar .turn { font-size: 18px; font-weight: bold; }
+    #top-bar .phase { font-size: 12px; color: #888; margin-top: 4px; }
+    
+    #side-panel {
+      position: absolute; top: 10px; right: 10px;
+      background: rgba(0,0,0,0.8); padding: 15px; border-radius: 8px;
+      width: 220px;
+    }
+    #side-panel h3 { font-size: 14px; margin-bottom: 10px; color: #ff8; }
+    #side-panel .stat { font-size: 12px; margin: 5px 0; color: #aaa; }
+    #side-panel .stat span { color: #0f8; }
+    
+    #bottom-panel {
+      position: absolute; bottom: 10px; left: 10px;
+      background: rgba(0,0,0,0.8); padding: 15px; border-radius: 8px;
+      width: 280px;
+    }
+    #bottom-panel h3 { font-size: 14px; margin-bottom: 10px; color: #ff8; }
+    
+    .btn {
+      background: rgba(0,100,200,0.3); border: 1px solid #0af; color: #0af;
+      padding: 6px 12px; margin: 3px; border-radius: 4px; cursor: pointer;
+      font-family: inherit; font-size: 11px; transition: all 0.2s;
+    }
+    .btn:hover { background: rgba(0,100,200,0.5); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn.primary { background: rgba(0,200,100,0.3); border-color: #0f8; color: #0f8; }
+    .btn.primary:hover { background: rgba(0,200,100,0.5); }
+    
+    #setup-panel {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: rgba(0,0,0,0.9); padding: 30px; border-radius: 12px;
+      text-align: center; min-width: 400px;
+    }
+    #setup-panel h2 { margin-bottom: 20px; color: #ff8; }
+    #setup-panel .option-group { margin: 15px 0; }
+    #setup-panel .option-group label { display: block; margin-bottom: 8px; color: #aaa; }
+    
+    .formation-grid {
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;
+      margin-top: 10px;
+    }
+    .formation-btn {
+      padding: 8px 4px; font-size: 10px; text-align: center;
+    }
+    .formation-btn.selected { background: rgba(0,200,100,0.4); border-color: #0f8; }
+    
+    #loading {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      font-size: 18px; z-index: 100;
+    }
+    #loading .dot { animation: blink 1s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    
+    #game-over-modal {
+      display: none;
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: rgba(0,0,0,0.95); padding: 40px; border-radius: 16px;
+      text-align: center; z-index: 200; border: 2px solid #ff8;
+    }
+    #game-over-modal h2 { font-size: 28px; margin-bottom: 10px; }
+    #game-over-modal.win { color: #0f8; }
+    #game-over-modal.lose { color: #f44; }
+  </style>
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+  
+  <div id="ui-overlay">
+    <div id="top-bar">
+      <div class="turn" id="turn-display">Turn 1</div>
+      <div class="phase" id="phase-display">Setup Phase</div>
+    </div>
+    
+    <div id="side-panel">
+      <h3>Fleet Status</h3>
+      <div class="stat">Blue Ships: <span id="blue-count">0</span></div>
+      <div class="stat">Red Ships: <span id="red-count">0</span></div>
+      <div class="stat" id="selected-info" style="margin-top:15px;color:#ff8;"></div>
+    </div>
+    
+    <div id="bottom-panel">
+      <h3>Actions</h3>
+      <button class="btn primary" id="end-turn-btn" disabled>End Turn</button>
+      <button class="btn" id="new-game-btn">New Game</button>
+      <div style="margin-top:10px;font-size:10px;color:#666;">
+        Click ship to select → Click green to move → Click red to attack
+      </div>
+    </div>
+    
+    <div id="setup-panel">
+      <h2>⚔️ SPACE FLEET TACTICS ⚔️</h2>
+      <div class="option-group">
+        <label>Choose your side:</label>
+        <button class="btn primary" onclick="selectSide(0)">🔵 Blue (Left)</button>
+        <button class="btn" onclick="selectSide(1)">🔴 Red (Right)</button>
+      </div>
+      <div class="option-group">
+        <label>Choose formation:</label>
+        <div class="formation-grid">
+          <button class="btn formation-btn" data-form="line">Line</button>
+          <button class="btn formation-btn" data-form="wedge">Wedge</button>
+          <button class="btn formation-btn" data-form="circle">Circle</button>
+          <button class="btn formation-btn" data-form="diamond">Diamond</button>
+          <button class="btn formation-btn" data-form="cluster">Cluster</button>
+        </div>
+      </div>
+      <div class="option-group">
+        <label>Position anchor (click on grid):</label>
+        <div id="position-hint" style="font-size:11px;color:#888;margin-top:5px;">Click 'Start Battle' then click on the grid</div>
+      </div>
+      <button class="btn primary" id="start-btn" disabled>Start Battle</button>
+    </div>
+    
+    <div id="game-over-modal">
+      <h2 id="game-over-title">Victory!</h2>
+      <p id="game-over-msg" style="color:#aaa;margin-bottom:20px;"></p>
+      <button class="btn primary" onclick="location.reload()">Play Again</button>
+    </div>
+  </div>
+  
+  <div id="loading">Loading Three.js<span class="dot">...</span></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  
+  <script>
+    // ── Game State ───────────────────────────────────────────────────────────
+    const STATE = {
+      ships: [],
+      board: null,
+      turn: 1,
+      phase: 'setup',
+      playerSide: 0,
+      selectedShip: null,
+      aiThinking: false,
+      gameOver: false,
+      winner: null,
+      setupStep: 0, // 0=side, 1=formation, 2=position
+      selectedFormation: 'line'
+    };
+    
+    const SHIP_TYPES = {
+      fighter:    { hp: 20, atk: 15, spd: 5, range: 2, label: 'Fighter' },
+      destroyer:  { hp: 50, atk: 30, spd: 3, range: 3, label: 'Destroyer' },
+      cruiser:    { hp: 100, atk: 50, spd: 2, range: 4, label: 'Cruiser' },
+      battleship: { hp: 200, atk: 80, spd: 1, range: 5, label: 'Battleship' },
+      carrier:    { hp: 80, atk: 20, spd: 2, range: 3, label: 'Carrier' },
+      flagship:   { hp: 500, atk: 100, spd: 1, range: 6, label: '★ Flagship' }
+    };
+    
+    const FORMATIONS = {
+      line:   [[0,-2],[0,-1],[0,0],[0,1],[0,2]],
+      wedge:  [[-2,0],[-1,-1],[-1,1],[0,-2],[0,0],[0,2],[1,-1],[1,1],[2,0]],
+      circle: [[0,-2],[1,-1],[1,1],[0,2],[-1,1],[-1,-1]],
+      diamond:[0,-3],[-1,-1],[1,-1],[0,1],[-1,3],[1,3],
+      cluster:[0,0],[-1,0],[1,0],[0,-1],[0,1]]
+    };
+    
+    // Fix: diamond should be array of arrays
+    FORMATIONS.diamond = [[0,-3],[-1,-1],[1,-1],[0,1],[-1,3],[1,3]];
+    
+    // ── Three.js Setup ───────────────────────────────────────────────────────
+    let scene, camera, renderer, clock;
+    let shipMeshes = {};
+    let indicators = [];
+    let starField;
+    let raycaster, mouse;
+    
+    const BOARD_W = 20, BOARD_H = 15;
+    
+    function initThree() {
+      const canvas = document.getElementById('game-canvas');
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x020208);
+      scene.fog = new THREE.FogExp2(0x020208, 0.015);
+      
+      camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 200);
+      camera.position.set(BOARD_W/2, 18, BOARD_H/2 + 10);
+      camera.lookAt(BOARD_W/2, 0, BOARD_H/2);
+      
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      
+      // Lights
+      scene.add(new THREE.AmbientLight(0x334466, 0.6));
+      const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+      dir.position.set(10, 20, 10);
+      scene.add(dir);
+      const rim = new THREE.PointLight(0x4488ff, 0.4, 50);
+      rim.position.set(-5, 10, -5);
+      scene.add(rim);
+      
+      // Star field
+      const starGeo = new THREE.BufferGeometry();
+      const starPos = [];
+      for (let i = 0; i < 2000; i++) {
+        starPos.push((Math.random()-0.5)*200, (Math.random()-0.5)*100+50, (Math.random()-0.5)*200);
+      }
+      starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
+      const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.3, transparent: true, opacity: 0.8 });
+      starField = new THREE.Points(starGeo, starMat);
+      scene.add(starField);
+      
+      // Grid
+      const gridHelper = new THREE.GridHelper(Math.max(BOARD_W, BOARD_H), Math.max(BOARD_W, BOARD_H), 0x223344, 0x112233);
+      gridHelper.position.set(BOARD_W/2 - 0.5, 0, BOARD_H/2 - 0.5);
+      scene.add(gridHelper);
+      
+      // Board boundary
+      const edgeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(BOARD_W, 0.1, BOARD_H));
+      const edgeMat = new THREE.LineBasicMaterial({ color: 0x4488aa });
+      const edgeMesh = new THREE.LineSegments(edgeGeo, edgeMat);
+      edgeMesh.position.set(BOARD_W/2 - 0.5, 0, BOARD_H/2 - 0.5);
+      scene.add(edgeMesh);
+      
+      raycaster = new THREE.Raycaster();
+      mouse = new THREE.Vector2();
+      
+      canvas.addEventListener('click', onCanvasClick);
+      canvas.addEventListener('mousemove', onCanvasMouseMove);
+      window.addEventListener('resize', onResize);
+      
+      clock = new THREE.Clock();
+      animate();
+    }
+    
+    function onResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    
+    function onCanvasMouseMove(e) {
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    }
+    
+    // ── Ship Mesh Creation ───────────────────────────────────────────────────
+    function createShipMesh(ship) {
+      if (shipMeshes[ship.id]) {
+        scene.remove(shipMeshes[ship.id]);
+        if (ship._hpBar) scene.remove(ship._hpBar);
+        if (ship._hpBg) scene.remove(ship._hpBg);
+        if (ship._glow) scene.remove(ship._glow);
+        delete shipMeshes[ship.id];
+      }
+      
+      if (!ship || ship.alive === false) return;
+      
+      const def = SHIP_TYPES[ship.type];
+      if (!def) return;
+      
+      let geo;
+      switch (ship.type) {
+        case 'fighter': geo = new THREE.ConeGeometry(0.15, 0.4, 4); break;
+        case 'destroyer': geo = new THREE.CylinderGeometry(0.15, 0.2, 0.5, 6); break;
+        case 'cruiser': geo = new THREE.BoxGeometry(0.6, 0.15, 0.3); break;
+        case 'battleship': geo = new THREE.BoxGeometry(0.9, 0.25, 0.4); break;
+        case 'carrier': geo = new THREE.BoxGeometry(1.0, 0.15, 0.6); break;
+        case 'flagship': geo = new THREE.OctahedronGeometry(0.5, 0); break;
+        default: geo = new THREE.SphereGeometry(0.2, 8, 8);
+      }
+      
+      const mat = new THREE.MeshStandardMaterial({
+        color: def.color,
+        emissive: ship.side === 0 ? 0x2244aa : 0xaa2222,
+        emissiveIntensity: 0.3,
+        roughness: 0.3,
+        metalness: 0.7
+      });
+      
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(ship.x, 0.3, ship.y);
+      mesh.userData = { shipId: ship.id };
+      scene.add(mesh);
+      shipMeshes[ship.id] = mesh;
+      
+      // Selection ring
+      if (ship.id === STATE.selectedShip?.id) {
+        const ringGeo = new THREE.TorusGeometry(0.4, 0.05, 8, 16);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.rotation.x = Math.PI / 2;
+        ring.position.set(ship.x, 0.05, ship.y);
+        scene.add(ring);
+        ship._ring = ring;
+      }
+      
+      // HP bar
+      const hpPct = ship.hp / ship.maxHp;
+      const hpColor = hpPct > 0.5 ? 0x44ff44 : hpPct > 0.25 ? 0xffaa00 : 0xff4444;
+      const hpBarGeo = new THREE.PlaneGeometry(0.6 * hpPct, 0.06);
+      const hpBarMat = new THREE.MeshBasicMaterial({ color: hpColor });
+      const hpBar = new THREE.Mesh(hpBarGeo, hpBarMat);
+      hpBar.position.set(ship.x, 0.55, ship.y);
+      scene.add(hpBar);
+      ship._hpBar = hpBar;
+      
+      const hpBgGeo = new THREE.PlaneGeometry(0.62, 0.08);
+      const hpBgMat = new THREE.MeshBasicMaterial({ color: 0x333333 });
+      const hpBg = new THREE.Mesh(hpBgGeo, hpBgMat);
+      hpBg.position.set(ship.x, 0.55, ship.y - 0.01);
+      scene.add(hpBg);
+      ship._hpBg = hpBg;
+      
+      // Flagship glow
+      if (ship.type === 'flagship') {
+        const glowGeo = new THREE.SphereGeometry(0.08, 8, 8);
+        const glowMat = new THREE.MeshBasicMaterial({ color: 0xffdd00 });
+        const glow = new THREE.Mesh(glowGeo, glowMat);
+        glow.position.set(ship.x, 0.7, ship.y);
+        scene.add(glow);
+        ship._glow = glow;
+      }
+    }
+    
+    function updateAllShipMeshes() {
+      for (const ship of STATE.ships) {
+        createShipMesh(ship);
+      }
+    }
+    
+    function showMoveIndicators(moves) {
+      clearIndicators();
+      for (const m of moves) {
+        const geo = new THREE.BoxGeometry(0.8, 0.05, 0.8);
+        const mat = new THREE.MeshBasicMaterial({ color: 0x44ff44, transparent: true, opacity: 0.4 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(m.x, 0.025, m.y);
+        scene.add(mesh);
+        indicators.push(mesh);
+      }
+    }
+    
+    function showAttackIndicators(targets) {
+      clearIndicators();
+      for (const t of targets) {
+        const geo = new THREE.BoxGeometry(0.8, 0.05, 0.8);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.5 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(t.x, 0.025, t.y);
+        scene.add(mesh);
+        indicators.push(mesh);
+      }
+    }
+    
+    function clearIndicators() {
+      indicators.forEach(m => scene.remove(m));
+      indicators = [];
+    }
+    
+    // ── Game Logic ───────────────────────────────────────────────────────────
+    function getValidMoves(ship) {
+      const moves = [];
+      const maxDist = ship.spd;
+      for (let dy = -maxDist; dy <= maxDist; dy++) {
+        for (let dx = -maxDist; dx <= maxDist; dx++) {
+          if (Math.abs(dx) + Math.abs(dy) > maxDist) continue;
+          const nx = ship.x + dx, ny = ship.y + dy;
+          if (nx >= 0 && nx < BOARD_W && ny >= 0 && ny < BOARD_H && !getShipAt(nx, ny)) {
+            moves.push({ x: nx, y: ny });
+          }
+        }
+      }
+      return moves;
+    }
+    
+    function getAttackableTargets(ship) {
+      return STATE.ships.filter(s => 
+        s.side !== ship.side && s.alive !== false && 
+        Math.abs(ship.x - s.x) + Math.abs(ship.y - s.y) <= ship.range
+      );
+    }
+    
+    function getShipAt(x, y) {
+      return STATE.ships.find(s => s.alive !== false && s.x === x && s.y === y);
+    }
+    
+    async function moveShip(shipId, newX, newY) {
+      const ship = STATE.ships.find(s => s.id === shipId);
+      if (!ship || ship.hasMoved) return;
+      
+      const dist = Math.abs(newX - ship.x) + Math.abs(newY - ship.y);
+      if (dist > ship.spd) return;
+      if (newX < 0 || newX >= BOARD_W || newY < 0 || newY >= BOARD_H) return;
+      if (getShipAt(newX, newY)) return;
+      
+      STATE.board[ship.y][ship.x] = null;
+      ship.x = newX;
+      ship.y = newY;
+      STATE.board[newY][newX] = ship;
+      ship.hasMoved = true;
+      
+      createShipMesh(ship);
+      updateUI();
+    }
+    
+    async function attackShip(attackerId, targetId) {
+      const attacker = STATE.ships.find(s => s.id === attackerId);
+      const target = STATE.ships.find(s => s.id === targetId);
+      if (!attacker || !target || target.alive === false) return;
+      if (attacker.side === target.side) return;
+      if (attacker.hasAttacked) return;
+      
+      const dist = Math.abs(attacker.x - target.x) + Math.abs(attacker.y - target.y);
+      if (dist > attacker.range) return;
+      
+      const baseDmg = attacker.atk;
+      const variance = Math.floor(Math.random() * 10) - 5;
+      const damage = Math.max(5, baseDmg + variance);
+      target.hp -= damage;
+      
+      let destroyed = false;
+      if (target.hp <= 0) {
+        STATE.board[target.y][target.x] = null;
+        target.alive = false;
+        destroyed = true;
+        
+        if (target.type === 'flagship') {
+          STATE.winner = attacker.side;
+          STATE.gameOver = true;
+          showGameOver();
+        }
+      }
+      
+      attacker.hasAttacked = true;
+      createShipMesh(target);
+      updateUI();
+      
+      return { damage, destroyed };
+    }
+    
+    async function endTurn() {
+      if (STATE.phase !== 'player_turn' || STATE.aiThinking) return;
+      
+      // Reset player ship states
+      for (const ship of STATE.ships) {
+        if (ship.side === STATE.playerSide) {
+          ship.hasMoved = false;
+          ship.hasAttacked = false;
+        }
+      }
+      
+      STATE.phase = 'enemy_turn';
+      STATE.aiThinking = true;
+      updateUI();
+      
+      await new Promise(r => setTimeout(r, 500));
+      await runAI();
+      
+      STATE.turn++;
+      STATE.phase = 'player_turn';
+      STATE.aiThinking = false;
+      
+      // Check if player has any ships
+      const playerShips = STATE.ships.filter(s => s.side === STATE.playerSide && s.alive !== false);
+      if (playerShips.length === 0) {
+        STATE.winner = 1 - STATE.playerSide;
+        STATE.gameOver = true;
+        showGameOver();
+      }
+      
+      updateUI();
+    }
+    
+    // ── AI System ────────────────────────────────────────────────────────────
+    async function runAI() {
+      const enemyShips = STATE.ships.filter(s => s.side === (1 - STATE.playerSide) && s.alive !== false);
+      const playerShips = STATE.ships.filter(s => s.side === STATE.playerSide && s.alive !== false);
+      
+      for (const ship of enemyShips) {
+        if (!STATE.ships.includes(ship)) continue;
+        
+        // Evaluate moves
+        const moves = getValidMoves(ship);
+        let bestMove = null, bestScore = -Infinity;
+        
+        for (const move of moves) {
+          const score = evaluatePosition(ship, move.x, move.y);
+          if (score > bestScore) {
+            bestScore = score;
+            bestMove = move;
+          }
+        }
+        
+        if (bestMove) {
+          STATE.board[ship.y][ship.x] = null;
+          ship.x = bestMove.x;
+          ship.y = bestMove.y;
+          STATE.board[bestMove.y][bestMove.x] = ship;
+          ship.hasMoved = true;
+          createShipMesh(ship);
+        }
+        
+        // Find best target
+        const targets = playerShips.filter(t => 
+          Math.abs(ship.x - t.x) + Math.abs(ship.y - t.y) <= ship.range
+        );
+        const bestTarget = findBestTarget(ship, targets);
+        
+        if (bestTarget && !ship.hasAttacked) {
+          await attackShip(ship.id, bestTarget.id);
+        }
+        
+        await new Promise(r => setTimeout(r, 100));
+      }
+    }
+    
+    function evaluatePosition(ship, x, y) {
+      let score = 0;
+      
+      // Distance to enemy flagship
+      const enemyFlagship = STATE.ships.find(s => 
+        s.side === (1 - STATE.playerSide) && s.type === 'flagship' && s.alive !== false
+      );
+      if (enemyFlagship) {
+        const dist = Math.abs(x - enemyFlagship.x) + Math.abs(y - enemyFlagship.y);
+        score += (20 - dist) * 10;
+      }
+      
+      // Protect friendly flagship
+      const friendlyFlagship = STATE.ships.find(s => 
+        s.side === ship.side && s.type === 'flagship' && s.alive !== false
+      );
+      if (friendlyFlagship) {
+        const dist = Math.abs(x - friendlyFlagship.x) + Math.abs(y - friendlyFlagship.y);
+        if (dist < 5) score += (5 - dist) * 20;
+      }
+      
+      // Kill opportunities
+      const enemies = STATE.ships.filter(s => 
+        s.side === (1 - STATE.playerSide) && s.alive !== false
+      );
+      for (const enemy of enemies) {
+        const dist = Math.abs(x - enemy.x) + Math.abs(y - enemy.y);
+        if (dist <= ship.range) {
+          if (enemy.hp <= ship.atk) {
+            score += 5000;
+            if (enemy.type === 'flagship') score += 10000;
+            else if (enemy.type === 'battleship') score += 3000;
+          } else {
+            score += (ship.atk - enemy.hp) * 2;
+          }
+        }
+      }
+      
+      // Formation
+      const friendlies = STATE.ships.filter(s => s.side === ship.side && s.alive !== false);
+      for (const friend of friendlies) {
+        if (friend.id === ship.id) continue;
+        const dist = Math.abs(x - friend.x) + Math.abs(y - friend.y);
+        if (dist <= 3) score += 10;
+        if (dist > 6) score -= 20;
+      }
+      
+      // Low HP retreat
+      if (ship.hp < ship.maxHp * 0.3) {
+        const enemyInRange = enemies.some(e => 
+          Math.abs(x - e.x) + Math.abs(y - e.y) <= e.range
+        );
+        if (enemyInRange) {
+          score -= 200;
+          const threat = enemies.find(e => Math.abs(x - e.x) + Math.abs(y - e.y) <= e.range);
+          if (threat) {
+            score += (Math.abs(x - threat.x) + Math.abs(y - threat.y)) * 15;
+          }
+        }
+      }
+      
+      return score;
+    }
+    
+    function findBestTarget(ship, targets) {
+      let bestTarget = null, bestScore = -Infinity;
+      
+      for (const target of targets) {
+        let score = 0;
+        const typeValues = { flagship: 10000, battleship: 500, carrier: 300, cruiser: 200, destroyer: 100, fighter: 50 };
+        score += typeValues[target.type] || 0;
+        score += (1 - target.hp / target.maxHp) * 200;
+        score += (ship.range - (Math.abs(ship.x - target.x) + Math.abs(ship.y - target.y))) * 10;
+        if (target.hp <= ship.atk) score += 5000;
+        
+        if (score > bestScore) {
+          bestScore = score;
+          bestTarget = target;
+        }
+      }
+      
+      return bestTarget;
+    }
+    
+    // ── UI Functions ─────────────────────────────────────────────────────────
+    function updateUI() {
+      document.getElementById('turn-display').textContent = `Turn ${STATE.turn}`;
+      document.getElementById('phase-display').textContent = 
+        STATE.phase === 'setup' ? 'Setup Phase' :
+        STATE.phase === 'player_turn' ? 'Your Turn' :
+        STATE.phase === 'enemy_turn' ? 'Enemy Turn...' : 'Game Over';
+      
+      const blueCount = STATE.ships.filter(s => s.side === 0 && s.alive !== false).length;
+      const redCount = STATE.ships.filter(s => s.side === 1 && s.alive !== false).length;
+      document.getElementById('blue-count').textContent = blueCount;
+      document.getElementById('red-count').textContent = redCount;
+      
+      if (STATE.selectedShip) {
+        const s = STATE.selectedShip;
+        document.getElementById('selected-info').innerHTML = 
+          `<b>${SHIP_TYPES[s.type].label}</b><br>` +
+          `HP: ${s.hp}/${s.maxHp}<br>` +
+          `ATK: ${s.atk} SPD: ${s.spd} RNG: ${s.range}<br>` +
+          `${s.hasMoved ? '✓ Moved' : '○ Ready'} ${s.hasAttacked ? '✓ Attacked' : '○ Ready'}`;
+      } else {
+        document.getElementById('selected-info').textContent = '';
+      }
+      
+      document.getElementById('end-turn-btn').disabled = 
+        STATE.phase !== 'player_turn' || STATE.aiThinking;
+    }
+    
+    function showGameOver() {
+      const modal = document.getElementById('game-over-modal');
+      const title = document.getElementById('game-over-title');
+      const msg = document.getElementById('game-over-msg');
+      
+      const won = STATE.winner === STATE.playerSide;
+      modal.className = won ? 'win' : 'lose';
+      title.textContent = won ? '🎉 VICTORY!' : '💀 DEFEAT';
+      msg.textContent = won ? 'Enemy fleet destroyed!' : 'Your fleet has been annihilated.';
+      modal.style.display = 'block';
+    }
+    
+    // ── Input Handling ───────────────────────────────────────────────────────
+    function onCanvasClick(e) {
+      if (STATE.gameOver || STATE.phase !== 'player_turn' || STATE.aiThinking) return;
+      
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(Object.values(shipMeshes));
+      
+      if (intersects.length > 0) {
+        const shipId = intersects[0].object.userData.shipId;
+        handleShipClick(shipId);
+      } else {
+        handleBoardClick(e);
+      }
+    }
+    
+    function handleShipClick(shipId) {
+      const ship = STATE.ships.find(s => s.id === shipId);
+      if (!ship) return;
+      
+      if (ship.side === STATE.playerSide) {
+        // Deselect previous
+        if (STATE.selectedShip?._ring) {
+          scene.remove(STATE.selectedShip._ring);
+          delete STATE.selectedShip._ring;
+        }
+        
+        STATE.selectedShip = ship;
+        ship._ring = null; // Will be created in createShipMesh
+        
+        createShipMesh(ship);
+        updateUI();
+        
+        if (!ship.hasMoved) {
+          showMoveIndicators(getValidMoves(ship));
+        } else if (!ship.hasAttacked) {
+          showAttackIndicators(getAttackableTargets(ship));
+        }
+      } else if (STATE.selectedShip && !STATE.selectedShip.hasAttacked) {
+        const dist = Math.abs(STATE.selectedShip.x - ship.x) + Math.abs(STATE.selectedShip.y - ship.y);
+        if (dist <= STATE.selectedShip.range) {
+          attackShip(STATE.selectedShip.id, ship.id);
+        }
+      }
+    }
+    
+    function handleBoardClick(e) {
+      if (!STATE.selectedShip || STATE.selectedShip.hasMoved) return;
+      
+      raycaster.setFromCamera(mouse, camera);
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const intersection = new THREE.Vector3();
+      raycaster.ray.intersectPlane(plane, intersection);
+      
+      if (intersection) {
+        const x = Math.round(intersection.x);
+        const y = Math.round(intersection.z);
+        moveShip(STATE.selectedShip.id, x, y);
+        
+        // Show attack indicators after move
+        setTimeout(() => {
+          if (STATE.selectedShip && !STATE.selectedShip.hasAttacked) {
+            showAttackIndicators(getAttackableTargets(STATE.selectedShip));
+          }
+        }, 100);
+      }
+    }
+    
+    // ── Animation Loop ───────────────────────────────────────────────────────
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = clock.getDelta();
+      
+      // Rotate ships
+      for (const id in shipMeshes) {
+        const mesh = shipMeshes[id];
+        mesh.rotation.y += dt * 0.5;
+        const ship = STATE.ships.find(s => s.id === id);
+        if (ship) {
+          mesh.position.y = 0.3 + Math.sin(Date.now() * 0.002 + parseInt(id, 36)) * 0.05;
+          if (ship._hpBar) {
+            ship._hpBar.position.y = mesh.position.y + 0.25;
+            ship._hpBg.position.y = mesh.position.y + 0.25;
+          }
+          if (ship._glow) {
+            ship._glow.position.y = mesh.position.y + 0.5;
+          }
+          if (ship._ring) {
+            ship._ring.position.y = mesh.position.y + 0.05;
+            ship._ring.rotation.z += dt * 2;
+          }
+        }
+      }
+      
+      // Rotate stars
+      if (starField) starField.rotation.y += dt * 0.02;
+      
+      renderer.render(scene, camera);
+    }
+    
+    // ── Setup Functions ──────────────────────────────────────────────────────
+    window.selectSide = function(side) {
+      STATE.playerSide = side;
+      document.querySelectorAll('#setup-panel .option-group:first-child .btn')
+        .forEach(b => b.classList.remove('selected'));
+      event.target.classList.add('selected');
+      checkSetupReady();
+    };
+    
+    document.querySelectorAll('.formation-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.formation-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        STATE.selectedFormation = btn.dataset.form;
+        checkSetupReady();
+      });
+    });
+    
+    function checkSetupReady() {
+      const ready = STATE.playerSide >= 0 && STATE.selectedFormation;
+      document.getElementById('start-btn').disabled = !ready;
+    }
+    
+    document.getElementById('start-btn').addEventListener('click', startGame);
+    document.getElementById('end-turn-btn').addEventListener('click', endTurn);
+    document.getElementById('new-game-btn').addEventListener('click', () => location.reload());
+    
+    async function startGame() {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('setup-panel').style.display = 'none';
+      
+      initThree();
+      
+      // Create board
+      STATE.board = Array.from({length: BOARD_H}, () => Array(BOARD_W).fill(null));
+      
+      // Place player fleet
+      const playerAnchors = STATE.playerSide === 0 
+        ? { x: 2, y: Math.floor(BOARD_H/2) }
+        : { x: BOARD_W - 3, y: Math.floor(BOARD_H/2) };
+      
+      const playerFleet = placeFleet(STATE.playerSide, STATE.selectedFormation, playerAnchors.x, playerAnchors.y);
+      
+      // Place enemy fleet (opposite formation)
+      const enemyFormation = Object.keys(FORMATIONS)[Math.floor(Math.random() * 5)];
+      const enemyAnchors = STATE.playerSide === 0
+        ? { x: BOARD_W - 3, y: Math.floor(BOARD_H/2) }
+        : { x: 2, y: Math.floor(BOARD_H/2) };
+      placeFleet(1 - STATE.playerSide, enemyFormation, enemyAnchors.x, enemyAnchors.y);
+      
+      updateAllShipMeshes();
+      updateUI();
+      
+      STATE.phase = 'player_turn';
+    }
+    
+    function placeFleet(side, formationName, anchorX, anchorY) {
+      const formation = FORMATIONS[formationName];
+      if (!formation) return [];
+      
+      const fleet = [];
+      const types = ['carrier','battleship','cruiser','cruiser','destroyer','destroyer','destroyer','fighter','fighter','fighter','fighter'];
+      
+      formation.forEach((offset, i) => {
+        if (i >= types.length) return;
+        const type = types[i];
+        const def = SHIP_TYPES[type];
+        const ship = {
+          id: `${side}-${fleet.length}`,
+          type, side,
+          hp: def.hp, maxHp: def.hp,
+          atk: def.atk, spd: def.spd, range: def.range,
+          x: anchorX + offset[0],
+          y: anchorY + offset[1],
+          hasMoved: false, hasAttacked: false, alive: true
+        };
+        if (ship.x >= 0 && ship.x < BOARD_W && ship.y >= 0 && ship.y < BOARD_H) {
+          STATE.board[ship.y][ship.x] = ship;
+          fleet.push(ship);
+          STATE.ships.push(ship);
+        }
+      });
+      return fleet;
+    }
+    
+    // ── Start ────────────────────────────────────────────────────────────────
+    // Show loading then init
+    setTimeout(() => {
+      document.getElementById('loading').textContent = 'Ready!';
+      setTimeout(() => {
+        document.getElementById('loading').style.display = 'none';
+      }, 500);
+    }, 1000);
+  </script>
+</body>
+</html>

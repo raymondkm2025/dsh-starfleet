@@ -1,0 +1,54 @@
+{
+  "name": "dsh-starfleet",
+  "version": "1.0.0",
+  "description": "Turn-based space fleet tactics game for DSH - fleet command, formations, and AI opponents in a 3D starfield",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "game",
+    "space",
+    "fleet",
+    "tactics",
+    "threejs",
+    "银河英雄伝説"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raymondkm2025/dsh-starfleet.git"
+  },
+  "homepage": "https://github.com/raymondkm2025/dsh-starfleet#readme",
+  "bugs": {
+    "url": "https://github.com/raymondkm2025/dsh-starfleet/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  }
+}
