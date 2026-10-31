@@ -177,6 +177,82 @@
       cluster:[[0,0],[-1,0],[1,0],[0,-1],[0,1]]
     };
     
+    // ── Audio System ─────────────────────────────────────────────────────────
+    let audioCtx = null;
+    
+    function initAudio() {
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      } catch(e) { console.warn('Audio not available'); }
+    }
+    
+    function playTone(freq, duration, type='sine', volume=0.15) {
+      if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    }
+    
+    function playSelect() {
+      playTone(880, 0.1, 'sine', 0.1);
+      setTimeout(() => playTone(1100, 0.1, 'sine', 0.1), 50);
+    }
+    
+    function playMove() {
+      playTone(440, 0.08, 'triangle', 0.08);
+    }
+    
+    function playAttack() {
+      // Laser blast
+      if (!audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    }
+    
+    function playExplosion() {
+      // Low rumble
+      playTone(80, 0.3, 'sawtooth', 0.2);
+      playTone(60, 0.4, 'square', 0.1);
+    }
+    
+    function playVictory() {
+      const notes = [523, 659, 784, 1047];
+      notes.forEach((n, i) => setTimeout(() => playTone(n, 0.2, 'sine', 0.15), i * 120));
+    }
+    
+    function playDefeat() {
+      const notes = [400, 350, 300, 200];
+      notes.forEach((n, i) => setTimeout(() => playTone(n, 0.3, 'sawtooth', 0.12), i * 150));
+    }
+    
+    function playEndTurn() {
+      playTone(600, 0.1, 'sine', 0.08);
+      setTimeout(() => playTone(500, 0.1, 'sine', 0.08), 80);
+    }
+    
+    // Resume audio on first interaction
+    document.addEventListener('click', () => {
+      if (!audioCtx) initAudio();
+      else if (audioCtx.state === 'suspended') audioCtx.resume();
+    }, { once: false });
+    
     // ── Three.js Setup ───────────────────────────────────────────────────────
     let scene, camera, renderer, clock;
     let shipMeshes = {};
@@ -412,6 +488,8 @@
       
       createShipMesh(ship);
       updateUI();
+      playMove();
+      playSelect();
       
       // Show attack indicators after move
       if (STATE.selectedShip?.id === shipId && !ship.hasAttacked) {
@@ -450,6 +528,8 @@
       attacker.hasAttacked = true;
       createShipMesh(target);
       updateUI();
+      playAttack();
+      if (destroyed) playExplosion();
       
       return { damage, destroyed };
     }
@@ -468,6 +548,7 @@
       STATE.phase = 'enemy_turn';
       STATE.aiThinking = true;
       updateUI();
+      playEndTurn();
       
       await new Promise(r => setTimeout(r, 500));
       await runAI();
@@ -672,6 +753,7 @@
       title.textContent = won ? '🎉 VICTORY!' : '💀 DEFEAT';
       msg.textContent = won ? 'Enemy fleet destroyed!' : 'Your fleet has been annihilated.';
       modal.style.display = 'block';
+      if (won) playVictory(); else playDefeat();
     }
     
     // ── Input Handling ───────────────────────────────────────────────────────
