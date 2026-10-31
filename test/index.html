@@ -173,12 +173,9 @@
       line:   [[0,-2],[0,-1],[0,0],[0,1],[0,2]],
       wedge:  [[-2,0],[-1,-1],[-1,1],[0,-2],[0,0],[0,2],[1,-1],[1,1],[2,0]],
       circle: [[0,-2],[1,-1],[1,1],[0,2],[-1,1],[-1,-1]],
-      diamond:[0,-3],[-1,-1],[1,-1],[0,1],[-1,3],[1,3],
-      cluster:[0,0],[-1,0],[1,0],[0,-1],[0,1]]
+      diamond:[[-1,-1],[0,-3],[1,-1],[0,1],[-1,3],[1,3]],
+      cluster:[[0,0],[-1,0],[1,0],[0,-1],[0,1]]
     };
-    
-    // Fix: diamond should be array of arrays
-    FORMATIONS.diamond = [[0,-3],[-1,-1],[1,-1],[0,1],[-1,3],[1,3]];
     
     // ── Three.js Setup ───────────────────────────────────────────────────────
     let scene, camera, renderer, clock;
@@ -415,6 +412,11 @@
       
       createShipMesh(ship);
       updateUI();
+      
+      // Show attack indicators after move
+      if (STATE.selectedShip?.id === shipId && !ship.hasAttacked) {
+        setTimeout(() => showAttackIndicators(getAttackableTargets(ship)), 50);
+      }
     }
     
     async function attackShip(attackerId, targetId) {
@@ -470,17 +472,36 @@
       await new Promise(r => setTimeout(r, 500));
       await runAI();
       
-      STATE.turn++;
-      STATE.phase = 'player_turn';
-      STATE.aiThinking = false;
-      
-      // Check if player has any ships
+      // Check win/loss before starting new turn
       const playerShips = STATE.ships.filter(s => s.side === STATE.playerSide && s.alive !== false);
+      const enemyShips = STATE.ships.filter(s => s.side === (1 - STATE.playerSide) && s.alive !== false);
+      
       if (playerShips.length === 0) {
         STATE.winner = 1 - STATE.playerSide;
         STATE.gameOver = true;
         showGameOver();
+        updateUI();
+        return;
       }
+      if (enemyShips.length === 0) {
+        STATE.winner = STATE.playerSide;
+        STATE.gameOver = true;
+        showGameOver();
+        updateUI();
+        return;
+      }
+      
+      STATE.turn++;
+      STATE.phase = 'player_turn';
+      STATE.aiThinking = false;
+      
+      // Clear selection
+      if (STATE.selectedShip?._ring) {
+        scene.remove(STATE.selectedShip._ring);
+        delete STATE.selectedShip._ring;
+      }
+      STATE.selectedShip = null;
+      clearIndicators();
       
       updateUI();
     }
@@ -491,7 +512,8 @@
       const playerShips = STATE.ships.filter(s => s.side === STATE.playerSide && s.alive !== false);
       
       for (const ship of enemyShips) {
-        if (!STATE.ships.includes(ship)) continue;
+        if (!STATE.ships.includes(ship) || ship.alive === false) continue;
+        if (ship.side !== (1 - STATE.playerSide)) continue;
         
         // Evaluate moves
         const moves = getValidMoves(ship);
@@ -674,16 +696,17 @@
       const ship = STATE.ships.find(s => s.id === shipId);
       if (!ship) return;
       
+      // Clear previous selection ring
+      if (STATE.selectedShip?._ring) {
+        scene.remove(STATE.selectedShip._ring);
+        delete STATE.selectedShip._ring;
+      }
+      clearIndicators();
+      
       if (ship.side === STATE.playerSide) {
-        // Deselect previous
-        if (STATE.selectedShip?._ring) {
-          scene.remove(STATE.selectedShip._ring);
-          delete STATE.selectedShip._ring;
-        }
-        
         STATE.selectedShip = ship;
-        ship._ring = null; // Will be created in createShipMesh
         
+        // Rebuild mesh with selection ring
         createShipMesh(ship);
         updateUI();
         
@@ -712,13 +735,6 @@
         const x = Math.round(intersection.x);
         const y = Math.round(intersection.z);
         moveShip(STATE.selectedShip.id, x, y);
-        
-        // Show attack indicators after move
-        setTimeout(() => {
-          if (STATE.selectedShip && !STATE.selectedShip.hasAttacked) {
-            showAttackIndicators(getAttackableTargets(STATE.selectedShip));
-          }
-        }, 100);
       }
     }
     
